@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import threading
 from flask import Flask, request
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
@@ -42,7 +43,7 @@ async def get_cell_handler(message: Message):
             f"🌀 **Уровень:** {cell['level']}\n\n"
             f"📖 **Значение:** {cell['description']}"
         )
-        await message.answer(response, parse_Mode="Markdown")
+        await message.answer(response, parse_mode="Markdown")
     else:
         if text.isdigit():
             await message.answer("⚠️ В игре Лила всего 72 клетки. Введите число от 1 до 72.")
@@ -51,14 +52,18 @@ async def get_cell_handler(message: Message):
 
 app = Flask(__name__)
 
+def run_async(coro):
+    asyncio.run(coro)
+
 @app.route(WEBHOOK_PATH, methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
         json_data = request.get_json(force=True)
         update = Update.model_validate(json_data, context={"bot": bot})
         
-        # Запускаем обработку апдейта в асинхронном цикле
-        asyncio.run(dp.feed_update(bot, update))
+        # Запускаем обновление в отдельном потоке с новым циклом событий
+        threading.Thread(target=run_async, args=(dp.feed_update(bot, update),)).start()
+        
         return "OK", 200
     return "Unsupported Media Type", 415
 
