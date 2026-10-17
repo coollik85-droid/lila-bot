@@ -1,7 +1,6 @@
 import os
 import json
 import asyncio
-import threading
 from flask import Flask, request
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
@@ -52,8 +51,14 @@ async def get_cell_handler(message: Message):
 
 app = Flask(__name__)
 
-def run_async(coro):
-    asyncio.run(coro)
+# Создаем постоянный фоновый цикл событий для обработки запросов бота
+loop = asyncio.new_event_loop()
+import threading
+def start_loop(l):
+    asyncio.set_event_loop(l)
+    l.run_forever()
+
+threading.Thread(target=start_loop, args=(loop,), daemon=True).start()
 
 @app.route(WEBHOOK_PATH, methods=['POST'])
 def webhook():
@@ -61,8 +66,8 @@ def webhook():
         json_data = request.get_json(force=True)
         update = Update.model_validate(json_data, context={"bot": bot})
         
-        # Запускаем обновление в отдельном потоке с новым циклом событий
-        threading.Thread(target=run_async, args=(dp.feed_update(bot, update),)).start()
+        # Безопасно отправляем задачу в постоянный фоновый цикл
+        asyncio.run_coroutine_threadsafe(dp.feed_update(bot, update), loop)
         
         return "OK", 200
     return "Unsupported Media Type", 415
