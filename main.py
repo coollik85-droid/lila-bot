@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 import threading
 import gspread
@@ -21,8 +22,15 @@ SCOPES = [
 def get_cell_from_sheet(cell_text: str):
     """Получает данные клетки по её номеру из Google Таблицы"""
     try:
-        # Загружаем ключи из файла credentials.json, который лежит в корне проекта
-        creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
+        # Проверяем, задана ли переменная окружения на Render, иначе ищем локальный credentials.json
+        google_creds_env = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+        
+        if google_creds_env:
+            creds_dict = json.loads(google_creds_env)
+            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        else:
+            creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
+            
         client = gspread.authorize(creds)
         
         # Открываем таблицу по имени и берем первый лист
