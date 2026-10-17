@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import threading
 from flask import Flask, request
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
@@ -20,7 +21,6 @@ def load_lila_data():
 
 LILA_DATA = load_lila_data()
 
-bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 @dp.message(CommandStart())
@@ -51,24 +51,20 @@ async def get_cell_handler(message: Message):
 
 app = Flask(__name__)
 
-# Создаем постоянный фоновый цикл событий для обработки запросов бота
-loop = asyncio.new_event_loop()
-import threading
-def start_loop(l):
-    asyncio.set_event_loop(l)
-    l.run_forever()
+async def process_update(json_data):
+    # Экземпляр бота создается внутри асинхронного контекста с закрытием сессии
+    async with Bot(token=BOT_TOKEN) as bot_instance:
+        update = Update.model_validate(json_data, context={"bot": bot_instance})
+        await dp.feed_update(bot=bot_instance, update=update)
 
-threading.Thread(target=start_loop, args=(loop,), daemon=True).start()
+def run_async(json_data):
+    asyncio.run(process_update(json_data))
 
 @app.route(WEBHOOK_PATH, methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
         json_data = request.get_json(force=True)
-        update = Update.model_validate(json_data, context={"bot": bot})
-        
-        # Безопасно отправляем задачу в постоянный фоновый цикл
-        asyncio.run_coroutine_threadsafe(dp.feed_update(bot, update), loop)
-        
+        threading.Thread(target=run_async, args=(json_data,)).start()
         return "OK", 200
     return "Unsupported Media Type", 415
 
