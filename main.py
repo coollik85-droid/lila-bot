@@ -1,98 +1,102 @@
+import os
 import asyncio
-import logging
-import sys
+import threading
 import gspread
 from google.oauth2.service_account import Credentials
+from flask import Flask, request
+from aiogram import Bot, Dispatcher, F
+from aiogram.filters import CommandStart
+from aiogram.types import Message, Update
 
-from aiogram import Bot, Dispatcher, F, html
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart, Command
-from aiogram.types import Message
+BOT_TOKEN = "8925097882:AAHvzhCGGV_oXbhkmgzl_-mdy-15hfj_fpM"
+WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 
-# Вставьте сюда ваш актуальный токен Telegram-бота
-TOKEN = "ВАШ_ТОКЕН_БОТА_ЗДЕСЬ"
-
-# Название вашей Google Таблицы
+# Настройки для подключения к Google Таблицам
 SPREADSHEET_NAME = "lila_cells_full"
-
-# Настройка доступов к Google Таблицам
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
     "https://www.googleapis.com/auth/drive.readonly"
 ]
 
-def get_cell_from_sheet(cell_number: int):
+def get_cell_from_sheet(cell_text: str):
     """Получает данные клетки по её номеру из Google Таблицы"""
     try:
-        # Загружаем ключи из локального файла credentials.json
+        # Загружаем ключи из файла credentials.json, который лежит в корне проекта
         creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
         client = gspread.authorize(creds)
         
-        # Открываем таблицу и получаем первый лист
+        # Открываем таблицу по имени и берем первый лист
         sheet = client.open(SPREADSHEET_NAME).sheet1  
         data = sheet.get_all_records()
         
         for row in data:
-            if int(row.get("number", 0)) == cell_number:
+            # Ищем строку, где номер клетки совпадает (приводим к строке для надежности)
+            if str(row.get("number", "")) == cell_text:
                 return {
                     "name": row.get("name"),
                     "level": row.get("level"),
                     "description": row.get("description")
                 }
     except Exception as e:
-        logging.error(f"Ошибка при чтении Google Таблицы: {e}")
+        print(f"Ошибка при чтении Google Таблицы: {e}")
     
     return None
 
-
-# Инициализация диспетчера и бота
 dp = Dispatcher()
 
 @dp.message(CommandStart())
-async def command_start_handler(message: Message) -> None:
-    """Приветственное сообщение при старте бота"""
+async def cmd_start(message: Message):
     await message.answer(
-        f"Привет, {html.bold(message.from_user.full_name)}!\n"
-        "Я бот игры «Лила». Отправь мне номер клетки (от 1 до 72), и я пришлю ее описание из Google Таблицы."
+        "👋 Привет! Я бот по игре **Лила**.\n\n"
+        "Отправь мне номер клетки (от **1** до **72**), и я покажу её значение.",
+        parse_mode="Markdown"
     )
 
-@dp.message(F.text.regexp(r"^\d+$"))
-async def cell_number_handler(message: Message) -> None:
-    """Обработка ввода номера клетки пользователем"""
-    cell_num = int(message.text)
+@dp.message(F.text)
+async def get_cell_handler(message: Message):
+    text = message.text.strip()
     
-    if not (1 <= cell_num <= 72):
-        await message.answer("Пожалуйста, введите число от 1 до 72.")
-        return
-
-    # Запрашиваем данные из Google Таблицы
-    cell_data = get_cell_from_sheet(cell_num)
-    
-    if cell_data:
-        response_text = (
-            f"🎯 **Клетка №{cell_num}**\n"
-            f"📌 **Название:** {cell_data['name']}\n"
-            f"🌐 **Уровень:** {cell_data['level']}\n\n"
-            f"📖 **Описание:** {cell_data['description']}"
-        )
-        await message.answer(response_text, parse_mode=ParseMode.MARKDOWN)
+    # Проверяем, что введено число от 1 до 72
+    if text.isdigit() and 1 <= int(text) <= 72:
+        cell = get_cell_from_sheet(text)
+        if cell:
+            response = (
+                f"📍 **Клетка №{text}**\n"
+                f"🏷 **Название:** {cell['name']}\n"
+                f"🌀 **Уровень:** {cell['level']}\n\n"
+                f"📖 **Значение:** {cell['description']}"
+            )
+            await message.answer(response, parse_mode="Markdown")
+        else:
+            await message.answer("⚠️ Не удалось найти данные для этой клетки в таблице.")
     else:
-        await message.answer(f"Не удалось найти данные для клетки №{cell_num} в таблице.")
+        if text.isdigit():
+            await message.answer("⚠️ В игре Лила всего 72 клетки. Введите число от 1 до 72.")
+        else:
+            await message.answer("ℹ️ Пожалуйста, просто отправьте число от 1 до 72.")
 
-@dp.message()
-async def echo_handler(message: Message) -> None:
-    """Запасной хэндлер для остальных сообщений"""
-    await message.answer("Пожалуйста, отправьте номер клетки от 1 до 72.")
+app = Flask(__name__)
 
+async def process_update(json_data):
+    # Экземпляр бота создается внутри асинхронного контекста с закрытием сессии
+    async with Bot(token=BOT_TOKEN) as bot_instance:
+        update = Update.model_validate(json_data, context={"bot": bot_instance})
+        await dp.feed_update(bot=bot_instance, update=update)
 
-async def main() -> None:
-    # Инициализация бота с настройками по умолчанию
-    bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    # Запуск поллинга
-    await dp.start_polling(bot)
+def run_async(json_data):
+    asyncio.run(process_update(json_data))
 
+@app.route(WEBHOOK_PATH, methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_data = request.get_json(force=True)
+        threading.Thread(target=run_async, args=(json_data,)).start()
+        return "OK", 200
+    return "Unsupported Media Type", 415
+
+@app.route("/", methods=['GET'])
+def index():
+    return "Lila Bot is running!", 200
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
-    asyncio.run(main())
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
