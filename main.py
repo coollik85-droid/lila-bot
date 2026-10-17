@@ -9,7 +9,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, Update
 
-BOT_TOKEN = "8925097882:AAHvzhCGGV_oXbhkmgzl_-mdy-15hfj_fpM"
+BOT_TOKEN = "8857839083:AAHHOTC75G7XkEqcRg0vGRawkdnAPx9kNJQ"
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 
 # Настройки для подключения к Google Таблицам
